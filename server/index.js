@@ -32,6 +32,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(sessionMiddleware);
 
+// Serve user logos
+app.use('/logos', express.static(path.join(__dirname, '..', 'logos')));
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/vms', requireAuth, vmRoutes);

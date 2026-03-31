@@ -1,11 +1,23 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 function UserAvatar({ name }) {
-  const initials = (name || '?')
-    .split('@')[0]
-    .slice(0, 2)
-    .toUpperCase();
+  const username = (name || '').split('@')[0];
+  const initials = username.slice(0, 2).toUpperCase() || '?';
+  const [hasLogo, setHasLogo] = useState(true);
+
+  if (hasLogo && username) {
+    return (
+      <img
+        src={`/logos/${username}.png`}
+        alt={username}
+        className="w-8 h-8 rounded-full object-cover"
+        onError={() => setHasLogo(false)}
+      />
+    );
+  }
+
   return (
     <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
       {initials}
