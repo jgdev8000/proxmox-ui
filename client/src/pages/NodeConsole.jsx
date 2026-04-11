@@ -15,7 +15,6 @@ export default function NodeConsole() {
   const [connectKey, setConnectKey] = useState(0);
 
   const connect = useCallback(async () => {
-    // Clean up previous
     if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
     if (xtermRef.current) { xtermRef.current.dispose(); xtermRef.current = null; }
 
@@ -59,42 +58,40 @@ export default function NodeConsole() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${proto}//${window.location.host}/api/console/ws?node=${node}&port=${data.port}&vncticket=${encodeURIComponent(data.ticket)}&terminal=1`;
 
-      const ws = new WebSocket(wsUrl);
+      const ws = new WebSocket(wsUrl, 'binary');
       wsRef.current = ws;
+      ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
         setStatus('Connected');
-        // Send terminal size
-        const dims = `${term.cols}:${term.rows}:`;
-        ws.send('0:' + dims);
       };
 
       ws.onmessage = (event) => {
-        const data = event.data;
-        if (typeof data === 'string' && data.length > 0) {
-          // Proxmox termproxy prefixes messages with channel number
-          const colon = data.indexOf(':');
-          if (colon >= 0) {
-            const payload = data.substring(colon + 1);
-            term.write(payload);
-          } else {
-            term.write(data);
-          }
+        let text;
+        if (event.data instanceof ArrayBuffer) {
+          text = new TextDecoder().decode(event.data);
+        } else {
+          text = event.data;
         }
+        term.write(text);
       };
 
-      ws.onclose = () => setStatus('Disconnected');
+      ws.onclose = (e) => {
+        console.log(`[term] WS closed: ${e.code} ${e.reason}`);
+        setStatus('Disconnected');
+      };
       ws.onerror = () => setStatus('Connection error');
 
       term.onData((input) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send('0:' + input);
+          ws.send(new TextEncoder().encode(input));
         }
       });
 
       term.onResize(({ cols, rows }) => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(`1:${cols}:${rows}:`);
+          // Send resize command: columns\0rows\0
+          ws.send(new TextEncoder().encode(`\x01${cols}:${rows}:`));
         }
       });
     } catch (err) {
@@ -110,7 +107,6 @@ export default function NodeConsole() {
     };
   }, [connect, connectKey]);
 
-  // Handle resize
   useEffect(() => {
     const handleResize = () => { if (fitRef.current) fitRef.current.fit(); };
     window.addEventListener('resize', handleResize);
@@ -128,9 +124,7 @@ export default function NodeConsole() {
             Dashboard
           </Link>
           <span className="text-gray-600">/</span>
-          <span>
-            Node Shell &mdash; {node}
-          </span>
+          <span>Node Shell &mdash; {node}</span>
           <span className={`text-xs ${status === 'Connected' ? 'text-green-400' : 'text-yellow-400'}`}>
             {status}
           </span>

@@ -49,17 +49,17 @@ export function setupWebSocket(server, sessionMiddleware) {
     const { ticket } = req.session.pve;
     const isTerminal = url.searchParams.get('terminal') === '1';
 
-    // Node terminal vs VM VNC console
+    // Node terminal vs VM VNC console — both use vncwebsocket endpoint
     let targetUrl;
     if (vmid) {
       targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
     } else {
-      targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/termproxy?port=${port}&ticket=${encodeURIComponent(vncticket)}`;
+      targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
     }
 
     console.log(`[ws] Connecting to Proxmox ${vmid ? 'VNC' : 'terminal'}: ${vmid ? `${node}/${type}/${vmid}` : `node/${node}`}`);
 
-    const pveWs = new WebSocket(targetUrl, isTerminal ? undefined : 'binary', {
+    const pveWs = new WebSocket(targetUrl, 'binary', {
       headers: {
         Cookie: `PVEAuthCookie=${ticket}`,
       },
