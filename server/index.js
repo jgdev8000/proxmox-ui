@@ -42,6 +42,45 @@ app.use('/api/vms', requireAuth, vmRoutes);
 app.use('/api/console', requireAuth, consoleRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
 
+// Debug: test node vncwebsocket endpoint
+import axios from 'axios';
+import https from 'node:https';
+app.get('/api/debug/test-ws/:node', requireAuth, async (req, res) => {
+  const { node } = req.params;
+  const { ticket, csrfToken } = req.session.pve;
+  try {
+    // First create a termproxy
+    const { createClient } = await import('./services/proxmox.js');
+    const client = createClient(ticket, csrfToken);
+    const { data: termData } = await client.post(`/nodes/${node}/termproxy`, new URLSearchParams({}));
+    const port = termData.data.port;
+    const vncticket = termData.data.ticket;
+
+    // Now try a regular GET to vncwebsocket
+    const url = `https://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
+    try {
+      const wsRes = await axios.get(url, {
+        headers: { Cookie: `PVEAuthCookie=${ticket}` },
+        httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+      });
+      res.json({ termproxy: termData.data, vncwebsocket: wsRes.data, url });
+    } catch (err2) {
+      res.json({
+        termproxy: termData.data,
+        vncwebsocket_error: {
+          status: err2.response?.status,
+          statusText: err2.response?.statusText,
+          data: err2.response?.data,
+          headers: err2.response?.headers,
+        },
+        url,
+      });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message, data: err.response?.data });
+  }
+});
+
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
   const clientDist = path.join(__dirname, '..', 'client', 'dist');
