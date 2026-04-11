@@ -12,8 +12,8 @@ router.post('/node/:node', async (req, res) => {
   const { node } = req.params;
   try {
     const client = createClient(req.session.pve.ticket, req.session.pve.csrfToken);
-    const { data } = await client.post(`/nodes/${node}/vncproxy`,
-      new URLSearchParams({ websocket: 1 })
+    const { data } = await client.post(`/nodes/${node}/termproxy`,
+      new URLSearchParams({})
     );
     res.json({
       port: data.data.port,

@@ -1,48 +1,102 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api } from '../api/client';
-import rfbModule from '@novnc/novnc/lib/rfb.js';
-const RFB = rfbModule.default || rfbModule;
+import { Terminal } from 'xterm';
+import { FitAddon } from 'xterm-addon-fit';
+import 'xterm/css/xterm.css';
 
 export default function NodeConsole() {
   const { node } = useParams();
-  const containerRef = useRef(null);
-  const rfbRef = useRef(null);
+  const termRef = useRef(null);
+  const xtermRef = useRef(null);
+  const wsRef = useRef(null);
+  const fitRef = useRef(null);
   const [status, setStatus] = useState('Connecting...');
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [connectKey, setConnectKey] = useState(0);
 
   const connect = useCallback(async () => {
-    if (rfbRef.current) {
-      try { rfbRef.current.disconnect(); } catch {}
-      rfbRef.current = null;
-    }
-    const container = containerRef.current;
-    if (container) {
-      while (container.firstChild) container.removeChild(container.firstChild);
-    }
+    // Clean up previous
+    if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
+    if (xtermRef.current) { xtermRef.current.dispose(); xtermRef.current = null; }
+
+    const container = termRef.current;
+    if (!container) return;
+    container.innerHTML = '';
 
     setStatus('Connecting...');
 
     try {
       const data = await api.getNodeConsoleTicket(node);
 
+      const term = new Terminal({
+        fontSize: 14,
+        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+        theme: {
+          background: '#1a1b26',
+          foreground: '#c0caf5',
+          cursor: '#c0caf5',
+          selectionBackground: '#33467c',
+          black: '#15161e',
+          red: '#f7768e',
+          green: '#9ece6a',
+          yellow: '#e0af68',
+          blue: '#7aa2f7',
+          magenta: '#bb9af7',
+          cyan: '#7dcfff',
+          white: '#a9b1d6',
+        },
+        cursorBlink: true,
+        scrollback: 5000,
+      });
+
+      const fit = new FitAddon();
+      term.loadAddon(fit);
+      term.open(container);
+      fit.fit();
+      fitRef.current = fit;
+      xtermRef.current = term;
+
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/api/console/ws?node=${node}&port=${data.port}&vncticket=${encodeURIComponent(data.ticket)}`;
+      const wsUrl = `${proto}//${window.location.host}/api/console/ws?node=${node}&port=${data.port}&vncticket=${encodeURIComponent(data.ticket)}&terminal=1`;
 
-      const rfb = new RFB(container, wsUrl, {
-        credentials: { password: data.ticket },
+      const ws = new WebSocket(wsUrl);
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        setStatus('Connected');
+        // Send terminal size
+        const dims = `${term.cols}:${term.rows}:`;
+        ws.send('0:' + dims);
+      };
+
+      ws.onmessage = (event) => {
+        const data = event.data;
+        if (typeof data === 'string' && data.length > 0) {
+          // Proxmox termproxy prefixes messages with channel number
+          const colon = data.indexOf(':');
+          if (colon >= 0) {
+            const payload = data.substring(colon + 1);
+            term.write(payload);
+          } else {
+            term.write(data);
+          }
+        }
+      };
+
+      ws.onclose = () => setStatus('Disconnected');
+      ws.onerror = () => setStatus('Connection error');
+
+      term.onData((input) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send('0:' + input);
+        }
       });
-      rfb.scaleViewport = true;
-      rfb.resizeSession = true;
 
-      rfb.addEventListener('connect', () => setStatus('Connected'));
-      rfb.addEventListener('disconnect', (e) => {
-        setStatus(e.detail.clean ? 'Disconnected' : 'Connection lost');
-        rfbRef.current = null;
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(`1:${cols}:${rows}:`);
+        }
       });
-
-      rfbRef.current = rfb;
     } catch (err) {
       setStatus(`Error: ${err.message}`);
     }
@@ -51,31 +105,20 @@ export default function NodeConsole() {
   useEffect(() => {
     connect();
     return () => {
-      if (rfbRef.current) {
-        try { rfbRef.current.disconnect(); } catch {}
-        rfbRef.current = null;
-      }
+      if (wsRef.current) { try { wsRef.current.close(); } catch {} }
+      if (xtermRef.current) { xtermRef.current.dispose(); }
     };
   }, [connect, connectKey]);
 
-  const reconnect = () => setConnectKey((k) => k + 1);
-  const sendCtrlAltDel = () => rfbRef.current?.sendCtrlAltDel();
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.parentElement?.requestFullscreen();
-    } else {
-      document.exitFullscreen();
-    }
-  };
-
+  // Handle resize
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', handler);
-    return () => document.removeEventListener('fullscreenchange', handler);
+    const handleResize = () => { if (fitRef.current) fitRef.current.fit(); };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const isDisconnected = status === 'Disconnected' || status === 'Connection lost';
+  const reconnect = () => setConnectKey((k) => k + 1);
+  const isDisconnected = status === 'Disconnected' || status === 'Connection error';
 
   return (
     <div className="flex flex-col h-[calc(100vh-52px)]">
@@ -86,7 +129,7 @@ export default function NodeConsole() {
           </Link>
           <span className="text-gray-600">/</span>
           <span>
-            Node Console &mdash; {node}
+            Node Shell &mdash; {node}
           </span>
           <span className={`text-xs ${status === 'Connected' ? 'text-green-400' : 'text-yellow-400'}`}>
             {status}
@@ -99,17 +142,9 @@ export default function NodeConsole() {
               Reconnect
             </button>
           )}
-          <button onClick={sendCtrlAltDel}
-            className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs cursor-pointer">
-            Ctrl+Alt+Del
-          </button>
-          <button onClick={toggleFullscreen}
-            className="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-xs cursor-pointer">
-            {isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'}
-          </button>
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 bg-black" />
+      <div ref={termRef} className="flex-1" style={{ backgroundColor: '#1a1b26' }} />
     </div>
   );
 }
