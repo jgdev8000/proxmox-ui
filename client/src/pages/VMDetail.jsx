@@ -51,6 +51,18 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
   const [message, setMessage] = useState(null);
   const [pendingSections, setPendingSections] = useState(new Set());
 
+  // Backup schedule state
+  const [backupEnabled, setBackupEnabled] = useState(false);
+  const [backupSchedule, setBackupSchedule] = useState('daily');
+  const [backupStorage, setBackupStorage] = useState('');
+  const [backupMode, setBackupMode] = useState('snapshot');
+  const [backupRetention, setBackupRetention] = useState('keep-last=3');
+  const [backupJobId, setBackupJobId] = useState(null);
+  const [backupStorages, setBackupStorages] = useState([]);
+  const [backupLoading, setBackupLoading] = useState(true);
+  const [backupSaving, setBackupSaving] = useState(false);
+  const [backupOriginal, setBackupOriginal] = useState({ enabled: false });
+
   // Track which sections have unsaved changes
   const hwChanged = isAdmin && (Number(cores) !== Number(config.cores || 1) || Number(memory) !== Number(config.memory || 512));
   const mediaChanged = iso !== currentISOVolid;
@@ -84,6 +96,74 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
     }
     fetchISOs();
   }, [node]);
+
+  // Fetch backup schedule and backup-capable storages
+  useEffect(() => {
+    async function fetchBackupInfo() {
+      try {
+        const [jobs, allStorages] = await Promise.all([
+          api.getBackupSchedule(node, type, vmid),
+          api.getAllStorages(node),
+        ]);
+        const bs = allStorages.filter((s) => s.content && s.content.split(',').includes('backup'));
+        setBackupStorages(bs);
+        if (bs.length > 0 && !backupStorage) setBackupStorage(bs[0].storage);
+
+        if (jobs.length > 0) {
+          const job = jobs[0];
+          setBackupEnabled(!!job.enabled);
+          setBackupSchedule(job.schedule || 'daily');
+          if (job.storage) setBackupStorage(job.storage);
+          setBackupMode(job.mode || 'snapshot');
+          setBackupRetention(job['prune-backups'] || 'keep-last=3');
+          setBackupJobId(job.id);
+          setBackupOriginal({ enabled: !!job.enabled, schedule: job.schedule, storage: job.storage, mode: job.mode });
+        }
+      } catch {}
+      finally { setBackupLoading(false); }
+    }
+    fetchBackupInfo();
+  }, [node, type, vmid]);
+
+  const handleBackupSave = async () => {
+    setBackupSaving(true);
+    try {
+      if (backupJobId) {
+        await api.updateBackupJob(backupJobId, {
+          enabled: backupEnabled,
+          schedule: backupSchedule,
+          storage: backupStorage,
+          mode: backupMode,
+          retention: backupRetention,
+        });
+      } else if (backupEnabled) {
+        await api.createBackupSchedule(node, type, vmid, {
+          schedule: backupSchedule,
+          storage: backupStorage,
+          mode: backupMode,
+          retention: backupRetention,
+        });
+      }
+      setMessage({ type: 'success', text: 'Backup schedule saved' });
+      setBackupOriginal({ enabled: backupEnabled, schedule: backupSchedule, storage: backupStorage, mode: backupMode });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally { setBackupSaving(false); }
+  };
+
+  const handleBackupDelete = async () => {
+    if (!backupJobId) return;
+    setBackupSaving(true);
+    try {
+      await api.deleteBackupJob(backupJobId);
+      setBackupEnabled(false);
+      setBackupJobId(null);
+      setBackupOriginal({ enabled: false });
+      setMessage({ type: 'success', text: 'Backup schedule removed' });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally { setBackupSaving(false); }
+  };
 
   const moveBootDevice = (index, direction) => {
     const newBoot = [...boot];
@@ -246,6 +326,82 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
             className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
             placeholder="VM description or notes..." />
+        </div>
+      </div>
+
+      {/* Scheduled Backups section */}
+      <div>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Scheduled Backups</h3>
+        <div className="bg-slate-50 rounded-lg p-4 border border-gray-100 transition-all duration-300 space-y-4">
+          {backupLoading ? (
+            <p className="text-sm text-gray-400">Loading...</p>
+          ) : (
+            <>
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={backupEnabled} onChange={(e) => setBackupEnabled(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                <span className="text-sm font-medium text-gray-900">Enable automatic backups</span>
+              </label>
+
+              {backupEnabled && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Schedule</label>
+                    <select value={backupSchedule} onChange={(e) => setBackupSchedule(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                      <option value="hourly">Hourly</option>
+                      <option value="daily">Daily (2:00 AM)</option>
+                      <option value="weekly">Weekly (Sunday 2:00 AM)</option>
+                      <option value="monthly">Monthly (1st, 2:00 AM)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Storage</label>
+                    <select value={backupStorage} onChange={(e) => setBackupStorage(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                      {backupStorages.map((s) => (
+                        <option key={s.storage} value={s.storage}>{s.storage}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Mode</label>
+                    <select value={backupMode} onChange={(e) => setBackupMode(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                      <option value="snapshot">Snapshot (no downtime)</option>
+                      <option value="suspend">Suspend (brief pause)</option>
+                      <option value="stop">Stop (VM stops)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-500 mb-1.5">Retention</label>
+                    <select value={backupRetention} onChange={(e) => setBackupRetention(e.target.value)}
+                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                      <option value="keep-last=1">Keep last 1</option>
+                      <option value="keep-last=3">Keep last 3</option>
+                      <option value="keep-last=5">Keep last 5</option>
+                      <option value="keep-last=7">Keep last 7</option>
+                      <option value="keep-last=14">Keep last 14</option>
+                      <option value="keep-last=30">Keep last 30</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button onClick={handleBackupSave} disabled={backupSaving}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-medium cursor-pointer disabled:opacity-50 transition-colors shadow-sm">
+                  {backupSaving ? 'Saving...' : backupJobId ? 'Update Schedule' : 'Create Schedule'}
+                </button>
+                {backupJobId && (
+                  <button onClick={handleBackupDelete} disabled={backupSaving}
+                    className="text-red-600 hover:bg-red-50 px-4 py-2 rounded-lg text-xs font-medium cursor-pointer disabled:opacity-50 transition-colors">
+                    Remove Schedule
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 

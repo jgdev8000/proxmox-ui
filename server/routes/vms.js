@@ -311,4 +311,79 @@ router.delete('/:node/backup/:volid', async (req, res) => {
   }
 });
 
+// ── Backup Schedules ──
+
+// Get backup schedule for a specific VM
+router.get('/:node/:type(qemu|lxc)/:vmid/backup-schedule', async (req, res) => {
+  const { vmid } = req.params;
+  try {
+    const client = pve(req);
+    const { data } = await client.get('/cluster/backup');
+    const jobs = data.data.filter((job) => {
+      const vmlist = (job.vmid || '').split(',').map((v) => v.trim());
+      return vmlist.includes(String(vmid)) || job.all === 1;
+    });
+    res.json(jobs);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to get backup schedule' });
+  }
+});
+
+// Create a backup schedule for a VM
+router.post('/:node/:type(qemu|lxc)/:vmid/backup-schedule', async (req, res) => {
+  const { vmid } = req.params;
+  const { schedule, storage, mode, compress, retention } = req.body;
+  try {
+    const client = pve(req);
+    const params = {
+      vmid: String(vmid),
+      schedule: schedule || 'daily',
+      mode: mode || 'snapshot',
+      compress: compress || 'zstd',
+      enabled: 1,
+      'prune-backups': retention || 'keep-last=3',
+    };
+    if (storage) params.storage = storage;
+
+    await client.post('/cluster/backup', new URLSearchParams(params));
+    res.json({ ok: true });
+  } catch (err) {
+    const msg = err.response?.data?.message || 'Failed to create backup schedule';
+    res.status(err.response?.status || 500).json({ error: msg });
+  }
+});
+
+// Update a backup schedule
+router.put('/backup-job/:jobid', async (req, res) => {
+  const { jobid } = req.params;
+  const { enabled, schedule, storage, mode, compress, retention } = req.body;
+  try {
+    const client = pve(req);
+    const params = {};
+    if (enabled !== undefined) params.enabled = enabled ? 1 : 0;
+    if (schedule) params.schedule = schedule;
+    if (storage) params.storage = storage;
+    if (mode) params.mode = mode;
+    if (compress) params.compress = compress;
+    if (retention) params['prune-backups'] = retention;
+
+    await client.put(`/cluster/backup/${jobid}`, new URLSearchParams(params));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to update backup schedule' });
+  }
+});
+
+// Delete a backup schedule
+router.delete('/backup-job/:jobid', async (req, res) => {
+  const { jobid } = req.params;
+  try {
+    const client = pve(req);
+    await client.delete(`/cluster/backup/${jobid}`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to delete backup schedule' });
+  }
+});
+
 export default router;

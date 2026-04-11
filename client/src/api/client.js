@@ -65,6 +65,18 @@ export const api = {
   deleteBackup: (node, volid) =>
     request(`/vms/${node}/backup/${encodeURIComponent(volid)}`, { method: 'DELETE' }),
 
+  // Backup schedules
+  getBackupSchedule: (node, type, vmid) => request(`/vms/${node}/${type}/${vmid}/backup-schedule`),
+  createBackupSchedule: (node, type, vmid, options) =>
+    request(`/vms/${node}/${type}/${vmid}/backup-schedule`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+  updateBackupJob: (jobid, options) =>
+    request(`/vms/backup-job/${jobid}`, { method: 'PUT', body: JSON.stringify(options) }),
+  deleteBackupJob: (jobid) =>
+    request(`/vms/backup-job/${jobid}`, { method: 'DELETE' }),
+
   // Admin
   admin: {
     getUsers: () => request('/admin/users'),

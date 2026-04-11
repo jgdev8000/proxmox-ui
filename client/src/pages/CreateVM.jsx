@@ -68,6 +68,7 @@ export default function CreateVM() {
   const [machine, setMachine] = useState('');
   const [description, setDescription] = useState('');
   const [startAfter, setStartAfter] = useState(false);
+  const [autoBackup, setAutoBackup] = useState(true);
 
   // Initial data fetch
   useEffect(() => {
@@ -167,9 +168,18 @@ export default function CreateVM() {
     if (description) config.description = description;
 
     try {
-      const result = await api.createVM(node, config);
+      await api.createVM(node, config);
+      // Set up daily backup schedule
+      if (autoBackup) {
+        try {
+          await api.createBackupSchedule(node, 'qemu', vmid, {
+            schedule: 'daily',
+            mode: 'snapshot',
+            retention: 'keep-last=3',
+          });
+        } catch {}
+      }
       if (startAfter) {
-        // Wait a bit for creation task, then start
         setTimeout(async () => {
           try { await api.vmAction(node, 'qemu', vmid, 'start'); } catch {}
         }, 5000);
@@ -351,11 +361,18 @@ export default function CreateVM() {
 
         {/* Actions */}
         <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex items-center justify-between">
-          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-            <input type="checkbox" checked={startAfter} onChange={(e) => setStartAfter(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
-            Start VM after creation
-          </label>
+          <div className="flex flex-col gap-2">
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={autoBackup} onChange={(e) => setAutoBackup(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+              Enable daily backups (keep last 3)
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input type="checkbox" checked={startAfter} onChange={(e) => setStartAfter(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+              Start VM after creation
+            </label>
+          </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => navigate('/')}
               className="px-5 py-2.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors">
