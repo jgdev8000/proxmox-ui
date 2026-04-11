@@ -13,13 +13,19 @@ router.post('/login', async (req, res) => {
     // Check admin permissions
     const client = createClient(data.ticket, data.CSRFPreventionToken);
     let isAdmin = false;
-    try {
-      const permsRes = await client.get('/access/permissions');
-      const perms = permsRes.data.data;
-      // Admin if they have Sys.UserMod on / or /access
-      isAdmin = !!(perms['/']?.['Sys.UserMod'] || perms['/access']?.['Sys.UserMod']);
-    } catch {
-      // Not admin
+    // root@pam always has full admin
+    if (data.username === 'root@pam') {
+      isAdmin = true;
+    } else {
+      try {
+        const permsRes = await client.get('/access/permissions');
+        const perms = permsRes.data.data;
+        // Admin if they have Sys.UserMod or Sys.Audit at root path
+        const rootPerms = perms['/'] || {};
+        isAdmin = !!(rootPerms['Sys.UserMod'] || rootPerms['User.Modify']);
+      } catch {
+        // Not admin
+      }
     }
     req.session.pve = {
       ticket: data.ticket,
