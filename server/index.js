@@ -43,21 +43,18 @@ app.use('/api/console', requireAuth, consoleRoutes);
 app.use('/api/admin', requireAuth, adminRoutes);
 
 // Debug: test node vncwebsocket endpoint
-import axios from 'axios';
-import https from 'node:https';
 app.get('/api/debug/test-ws/:node', requireAuth, async (req, res) => {
   const { node } = req.params;
   const { ticket, csrfToken } = req.session.pve;
   try {
-    // First create a termproxy
     const { createClient } = await import('./services/proxmox.js');
     const client = createClient(ticket, csrfToken);
     const { data: termData } = await client.post(`/nodes/${node}/termproxy`, new URLSearchParams({}));
     const port = termData.data.port;
     const vncticket = termData.data.ticket;
-
-    // Now try a regular GET to vncwebsocket
     const url = `https://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
+    const { default: axios } = await import('axios');
+    const { default: https } = await import('node:https');
     try {
       const wsRes = await axios.get(url, {
         headers: { Cookie: `PVEAuthCookie=${ticket}` },
@@ -71,7 +68,6 @@ app.get('/api/debug/test-ws/:node', requireAuth, async (req, res) => {
           status: err2.response?.status,
           statusText: err2.response?.statusText,
           data: err2.response?.data,
-          headers: err2.response?.headers,
         },
         url,
       });
