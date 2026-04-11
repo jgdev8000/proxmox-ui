@@ -129,4 +129,96 @@ router.get('/:node/storage/:storage/isos', async (req, res) => {
   }
 });
 
+// Get next free VMID
+router.get('/nextid', async (req, res) => {
+  try {
+    const client = pve(req);
+    const { data } = await client.get('/cluster/nextid');
+    res.json({ vmid: data.data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to get next VMID' });
+  }
+});
+
+// List cluster nodes
+router.get('/nodes', async (req, res) => {
+  try {
+    const client = pve(req);
+    const { data } = await client.get('/nodes');
+    res.json(data.data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to list nodes' });
+  }
+});
+
+// List all storages on a node (for disk creation)
+router.get('/:node/storage-all', async (req, res) => {
+  const { node } = req.params;
+  try {
+    const client = pve(req);
+    const { data } = await client.get(`/nodes/${node}/storage`);
+    res.json(data.data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to list storages' });
+  }
+});
+
+// List available network bridges on a node
+router.get('/:node/networks', async (req, res) => {
+  const { node } = req.params;
+  try {
+    const client = pve(req);
+    const { data } = await client.get(`/nodes/${node}/network`, { params: { type: 'bridge' } });
+    res.json(data.data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to list networks' });
+  }
+});
+
+// Create a VM
+router.post('/:node/qemu', async (req, res) => {
+  const { node } = req.params;
+  const {
+    vmid, name, cores, memory, sockets,
+    scsi0, ide2, net0, boot,
+    ostype, bios, machine, description,
+  } = req.body;
+
+  if (!vmid || !name) {
+    return res.status(400).json({ error: 'vmid and name are required' });
+  }
+
+  const params = {
+    vmid,
+    name,
+    cores: cores || 1,
+    memory: memory || 2048,
+    sockets: sockets || 1,
+    ostype: ostype || 'l26',
+    bios: bios || 'seabios',
+    scsihw: 'virtio-scsi-single',
+  };
+
+  if (scsi0) params.scsi0 = scsi0;
+  if (ide2) params.ide2 = ide2;
+  if (net0) params.net0 = net0;
+  if (boot) params.boot = boot;
+  if (machine) params.machine = machine;
+  if (description) params.description = description;
+
+  try {
+    const client = pve(req);
+    const { data } = await client.post(
+      `/nodes/${node}/qemu`,
+      new URLSearchParams(params)
+    );
+    res.json({ taskid: data.data, vmid });
+  } catch (err) {
+    const msg = err.response?.data?.errors
+      ? Object.values(err.response.data.errors).join(', ')
+      : err.response?.data?.message || 'Failed to create VM';
+    res.status(err.response?.status || 500).json({ error: msg });
+  }
+});
+
 export default router;

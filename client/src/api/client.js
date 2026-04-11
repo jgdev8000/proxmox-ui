@@ -42,7 +42,13 @@ export const api = {
       body: JSON.stringify(config),
     }),
   getStorages: (node) => request(`/vms/${node}/storage`),
+  getAllStorages: (node) => request(`/vms/${node}/storage-all`),
   getISOs: (node, storage) => request(`/vms/${node}/storage/${storage}/isos`),
+  getNodes: () => request('/vms/nodes'),
+  getNextID: () => request('/vms/nextid'),
+  getNetworks: (node) => request(`/vms/${node}/networks`),
+  createVM: (node, config) =>
+    request(`/vms/${node}/qemu`, { method: 'POST', body: JSON.stringify(config) }),
 
   // Admin
   admin: {
