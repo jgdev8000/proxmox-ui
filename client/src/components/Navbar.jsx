@@ -2,26 +2,25 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-function UserAvatar({ name }) {
-  const username = (name || '').split('@')[0];
-  const initials = username.slice(0, 2).toUpperCase() || '?';
+function BrandLogo({ username }) {
+  const name = (username || '').split('@')[0];
   const [hasLogo, setHasLogo] = useState(true);
 
-  if (hasLogo && username) {
+  if (hasLogo && name) {
     return (
       <img
-        src={`/logos/${username}.png`}
-        alt={username}
-        className="w-8 h-8 rounded-full object-cover"
+        src={`/logos/${name}.png`}
+        alt=""
+        className="h-8 max-w-[140px] object-contain"
         onError={() => setHasLogo(false)}
       />
     );
   }
 
   return (
-    <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
-      {initials}
-    </div>
+    <svg className="w-6 h-6 text-blue-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-13.5 0a3 3 0 0 1-3-3m3 3h13.5m-13.5 0a3 3 0 0 0-3 3m18-3a3 3 0 0 1 3-3m0 0a3 3 0 0 1-3 3m3-3H5.25m13.5 0a3 3 0 0 0 3-3M5.25 5.25A3 3 0 0 0 2.25 8.25m3-3h13.5a3 3 0 0 1 3 3m-19.5 0A3 3 0 0 1 5.25 5.25" />
+    </svg>
   );
 }
 
@@ -32,9 +31,7 @@ export default function Navbar() {
     <nav className="sticky top-0 z-50 bg-gray-950 border-b border-gray-800 shadow-lg shadow-black/10">
       <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 group">
-          <svg className="w-6 h-6 text-blue-500 group-hover:text-blue-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 0 1-3-3m3 3a3 3 0 1 0 0 6h13.5a3 3 0 1 0 0-6m-13.5 0a3 3 0 0 1-3-3m3 3h13.5m-13.5 0a3 3 0 0 0-3 3m18-3a3 3 0 0 1 3-3m0 0a3 3 0 0 1-3 3m3-3H5.25m13.5 0a3 3 0 0 0 3-3M5.25 5.25A3 3 0 0 0 2.25 8.25m3-3h13.5a3 3 0 0 1 3 3m-19.5 0A3 3 0 0 1 5.25 5.25" />
-          </svg>
+          <BrandLogo username={user} />
           <span className="text-white font-semibold text-sm tracking-wide group-hover:text-gray-200 transition-colors">
             Proxmox Panel
           </span>
@@ -46,7 +43,9 @@ export default function Navbar() {
             </Link>
           )}
           <div className="w-px h-6 bg-gray-800" />
-          <UserAvatar name={user} />
+          <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs font-bold text-white">
+            {(user || '?').split('@')[0].slice(0, 2).toUpperCase()}
+          </div>
           <div className="flex flex-col">
             <span className="text-white text-sm font-medium leading-tight">{user?.split('@')[0]}</span>
             <span className="text-gray-500 text-[11px] leading-tight">{user?.includes('@') ? user.split('@')[1] : ''}</span>
