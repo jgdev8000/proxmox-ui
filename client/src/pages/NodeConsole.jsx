@@ -56,7 +56,7 @@ export default function NodeConsole() {
       xtermRef.current = term;
 
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${window.location.host}/api/console/ws?node=${node}&port=${data.port}&vncticket=${encodeURIComponent(data.ticket)}&terminal=1`;
+      const wsUrl = `${proto}//${window.location.host}/api/console/ws?node=${node}&port=${data.port}&vncticket=${encodeURIComponent(data.ticket)}`;
 
       const ws = new WebSocket(wsUrl, 'binary');
       wsRef.current = ws;

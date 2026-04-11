@@ -47,17 +47,16 @@ export function setupWebSocket(server, sessionMiddleware) {
     }
 
     const { ticket } = req.session.pve;
-    const isTerminal = url.searchParams.get('terminal') === '1';
 
-    // Node terminal vs VM VNC console — both use vncwebsocket endpoint
-    let targetUrl;
-    if (vmid) {
-      targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
-    } else {
-      targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
-    }
+    // Both VM console and node terminal use the same vncwebsocket endpoint
+    const basePath = vmid
+      ? `/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket`
+      : `/api2/json/nodes/${node}/vncwebsocket`;
 
-    console.log(`[ws] Connecting to Proxmox ${vmid ? 'VNC' : 'terminal'}: ${vmid ? `${node}/${type}/${vmid}` : `node/${node}`}`);
+    const targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}${basePath}?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
+
+    console.log(`[ws] Target URL: ${basePath}?port=${port}&vncticket=<hidden>`);
+    console.log(`[ws] Connecting to Proxmox: ${vmid ? `${node}/${type}/${vmid}` : `node/${node}`}`);
 
     const pveWs = new WebSocket(targetUrl, 'binary', {
       headers: {
@@ -69,9 +68,8 @@ export function setupWebSocket(server, sessionMiddleware) {
     let msgCount = 0;
 
     pveWs.on('open', () => {
-      console.log(`[ws] Connected to Proxmox VNC for ${type}/${vmid}`);
+      console.log(`[ws] Connected to Proxmox for ${vmid ? `${type}/${vmid}` : `node/${node}`}`);
 
-      // Forward queued client messages now that upstream is ready
       clientWs.on('message', (data, isBinary) => {
         if (pveWs.readyState === WebSocket.OPEN) {
           pveWs.send(data, { binary: isBinary });
@@ -87,6 +85,16 @@ export function setupWebSocket(server, sessionMiddleware) {
       if (clientWs.readyState === WebSocket.OPEN) {
         clientWs.send(data, { binary: isBinary });
       }
+    });
+
+    pveWs.on('unexpected-response', (req, res) => {
+      console.error(`[ws] Unexpected response: ${res.statusCode} ${res.statusMessage}`);
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        console.error(`[ws] Response body: ${body}`);
+        clientWs.close();
+      });
     });
 
     pveWs.on('error', (err) => {
