@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../api/client';
 
 function BrandLogo({ username }) {
   const name = (username || '').split('@')[0];
@@ -24,6 +25,60 @@ function BrandLogo({ username }) {
   );
 }
 
+function NodeConsoleMenu() {
+  const [open, setOpen] = useState(false);
+  const [nodes, setNodes] = useState([]);
+  const ref = useRef(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!open) return;
+    async function fetchNodes() {
+      try {
+        const data = await api.getNodes();
+        setNodes(data.filter((n) => n.status === 'online').sort((a, b) => a.node.localeCompare(b.node)));
+      } catch {}
+    }
+    fetchNodes();
+  }, [open]);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={() => setOpen(!open)}
+        className="text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m6.75 7.5 3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z" />
+        </svg>
+        Node Shell
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-1 w-48 bg-gray-900 border border-gray-700 rounded-lg shadow-xl overflow-hidden z-50">
+          {nodes.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-gray-500">Loading...</div>
+          ) : (
+            nodes.map((n) => (
+              <button key={n.node} onClick={() => { setOpen(false); navigate(`/node-console/${n.node}`); }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white cursor-pointer flex items-center gap-2 transition-colors">
+                <span className={`w-2 h-2 rounded-full ${n.status === 'online' ? 'bg-green-500' : 'bg-red-500'}`} />
+                {n.node}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Navbar() {
   const { user, isAdmin, logout } = useAuth();
 
@@ -37,6 +92,7 @@ export default function Navbar() {
           </span>
         </Link>
         <div className="flex items-center gap-3">
+          {isAdmin && <NodeConsoleMenu />}
           {isAdmin && (
             <Link to="/admin" className="text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
               Admin

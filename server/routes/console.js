@@ -23,4 +23,25 @@ router.post('/:node/:type(qemu|lxc)/:vmid', async (req, res) => {
   }
 });
 
+// Request a VNC proxy ticket for a Proxmox node (admin only)
+router.post('/node/:node', async (req, res) => {
+  if (!req.session.pve.isAdmin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  const { node } = req.params;
+  try {
+    const client = createClient(req.session.pve.ticket, req.session.pve.csrfToken);
+    const { data } = await client.post(`/nodes/${node}/vncproxy`,
+      new URLSearchParams({ websocket: 1 })
+    );
+    res.json({
+      port: data.data.port,
+      ticket: data.data.ticket,
+      node,
+    });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to create node VNC proxy' });
+  }
+});
+
 export default router;

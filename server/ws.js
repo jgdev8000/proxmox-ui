@@ -40,17 +40,19 @@ export function setupWebSocket(server, sessionMiddleware) {
     const port = url.searchParams.get('port');
     const vncticket = url.searchParams.get('vncticket');
 
-    if (!node || !vmid || !port || !vncticket) {
+    if (!node || !port || !vncticket) {
       console.error('[ws] Missing params:', { node, vmid, port, vncticket: !!vncticket });
       clientWs.close(1008, 'Missing parameters');
       return;
     }
 
     const { ticket } = req.session.pve;
-    const targetUrl =
-      `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
+    // Node console vs VM console
+    const targetUrl = vmid
+      ? `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`
+      : `wss://${config.proxmox.host}:${config.proxmox.port}/api2/json/nodes/${node}/vncwebsocket?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
 
-    console.log(`[ws] Connecting to Proxmox VNC: ${node}/${type}/${vmid}`);
+    console.log(`[ws] Connecting to Proxmox VNC: ${vmid ? `${node}/${type}/${vmid}` : `node/${node}`}`);
 
     const pveWs = new WebSocket(targetUrl, 'binary', {
       headers: {

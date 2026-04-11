@@ -35,6 +35,8 @@ export const api = {
 
   getConsoleTicket: (node, type, vmid) =>
     request(`/console/${node}/${type}/${vmid}`, { method: 'POST' }),
+  getNodeConsoleTicket: (node) =>
+    request(`/console/node/${node}`, { method: 'POST' }),
 
   updateConfig: (node, type, vmid, config) =>
     request(`/vms/${node}/${type}/${vmid}/config`, {

@@ -7,6 +7,7 @@ import VMDetail from './pages/VMDetail';
 import Console from './pages/Console';
 import Admin from './pages/Admin';
 import CreateVM from './pages/CreateVM';
+import NodeConsole from './pages/NodeConsole';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -46,6 +47,7 @@ export default function App() {
                 <Route path="/console/:node/:type/:vmid" element={<Console />} />
                 <Route path="/create-vm" element={<CreateVM />} />
                 {isAdmin && <Route path="/admin" element={<Admin />} />}
+                {isAdmin && <Route path="/node-console/:node" element={<NodeConsole />} />}
               </Routes>
             </ProtectedRoute>
           }
