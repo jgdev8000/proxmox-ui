@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import VMDetail from './pages/VMDetail';
 import Console from './pages/Console';
+import Admin from './pages/Admin';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -19,7 +20,7 @@ function ProtectedRoute({ children }) {
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, isAdmin, loading } = useAuth();
 
   if (loading) {
     return (
@@ -42,6 +43,7 @@ export default function App() {
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/vm/:node/:type/:vmid" element={<VMDetail />} />
                 <Route path="/console/:node/:type/:vmid" element={<Console />} />
+                {isAdmin && <Route path="/admin" element={<Admin />} />}
               </Routes>
             </ProtectedRoute>
           }

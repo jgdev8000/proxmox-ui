@@ -26,7 +26,7 @@ function UserAvatar({ name }) {
 }
 
 export default function Navbar() {
-  const { user, logout } = useAuth();
+  const { user, isAdmin, logout } = useAuth();
 
   return (
     <nav className="sticky top-0 z-50 bg-gray-950 border-b border-gray-800 shadow-lg shadow-black/10">
@@ -40,6 +40,12 @@ export default function Navbar() {
           </span>
         </Link>
         <div className="flex items-center gap-3">
+          {isAdmin && (
+            <Link to="/admin" className="text-gray-400 hover:text-white hover:bg-gray-800 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+              Admin
+            </Link>
+          )}
+          <div className="w-px h-6 bg-gray-800" />
           <UserAvatar name={user} />
           <div className="flex flex-col">
             <span className="text-white text-sm font-medium leading-tight">{user?.split('@')[0]}</span>

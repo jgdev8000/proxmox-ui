@@ -35,4 +35,49 @@ export const api = {
 
   getConsoleTicket: (node, type, vmid) =>
     request(`/console/${node}/${type}/${vmid}`, { method: 'POST' }),
+
+  // Admin
+  admin: {
+    getUsers: () => request('/admin/users'),
+    createUser: (userid, password, comment) =>
+      request('/admin/users', {
+        method: 'POST',
+        body: JSON.stringify({ userid, password, comment }),
+      }),
+    deleteUser: (userid) =>
+      request(`/admin/users/${encodeURIComponent(userid)}`, { method: 'DELETE' }),
+    changePassword: (userid, password) =>
+      request(`/admin/users/${encodeURIComponent(userid)}/password`, {
+        method: 'PUT',
+        body: JSON.stringify({ password }),
+      }),
+    getVMs: () => request('/admin/vms'),
+    getACLs: () => request('/admin/acls'),
+    setACL: (path, users, roles) =>
+      request('/admin/acls', {
+        method: 'PUT',
+        body: JSON.stringify({ path, users, roles }),
+      }),
+    removeACL: (path, users, roles) =>
+      request('/admin/acls', {
+        method: 'DELETE',
+        body: JSON.stringify({ path, users, roles }),
+      }),
+    uploadLogo: async (userid, file) => {
+      const form = new FormData();
+      form.append('logo', file);
+      const res = await fetch(`${BASE}/admin/users/${encodeURIComponent(userid)}/logo`, {
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Upload failed');
+      }
+      return res.json();
+    },
+    deleteLogo: (userid) =>
+      request(`/admin/users/${encodeURIComponent(userid)}/logo`, { method: 'DELETE' }),
+  },
 };

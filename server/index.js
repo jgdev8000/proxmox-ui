@@ -8,6 +8,7 @@ import config from './config.js';
 import authRoutes from './routes/auth.js';
 import vmRoutes from './routes/vms.js';
 import consoleRoutes from './routes/console.js';
+import adminRoutes from './routes/admin.js';
 import requireAuth from './middleware/auth.js';
 import { setupWebSocket } from './ws.js';
 
@@ -39,6 +40,7 @@ app.use('/logos', express.static(path.join(__dirname, '..', 'logos')));
 app.use('/api/auth', authRoutes);
 app.use('/api/vms', requireAuth, vmRoutes);
 app.use('/api/console', requireAuth, consoleRoutes);
+app.use('/api/admin', requireAuth, adminRoutes);
 
 // Serve React build in production
 if (process.env.NODE_ENV === 'production') {
