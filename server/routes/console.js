@@ -21,8 +21,9 @@ router.post('/node/:node', async (req, res) => {
       node,
     });
   } catch (err) {
-    console.error('[console] Node VNC proxy error:', err.response?.data || err.message);
-    res.status(err.response?.status || 500).json({ error: 'Failed to create node VNC proxy' });
+    console.error('[console] Node VNC proxy error:', JSON.stringify(err.response?.data || err.message));
+    console.error('[console] Status:', err.response?.status);
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.message || 'Failed to create node VNC proxy' });
   }
 });
 
