@@ -49,6 +49,23 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
   const [memory, setMemory] = useState(config.memory || 512);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState(null);
+  const [pendingSections, setPendingSections] = useState(new Set());
+
+  // Track which sections have unsaved changes
+  const hwChanged = isAdmin && (Number(cores) !== Number(config.cores || 1) || Number(memory) !== Number(config.memory || 512));
+  const mediaChanged = iso !== currentISOVolid;
+  const bootChanged = `order=${boot.join(';')}` !== bootStr;
+  const notesChanged = description !== (config.description || '');
+
+  // After save, keep sections highlighted if they need a restart
+  const needsRestart = isRunning && (pendingSections.has('hardware') || hwChanged);
+
+  function sectionClass(changed, sectionKey) {
+    const pending = pendingSections.has(sectionKey);
+    if (pending) return 'bg-amber-50 rounded-lg p-4 border border-amber-300 ring-1 ring-amber-200';
+    if (changed) return 'bg-blue-50 rounded-lg p-4 border border-blue-300 ring-1 ring-blue-200';
+    return 'bg-slate-50 rounded-lg p-4 border border-gray-100';
+  }
 
   useEffect(() => {
     async function fetchISOs() {
@@ -99,7 +116,22 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
     }
     try {
       await api.updateConfig(node, type, vmid, updates);
-      setMessage({ type: 'success', text: 'Configuration saved' });
+      // Track sections that need restart (CPU/RAM while running)
+      const newPending = new Set(pendingSections);
+      if (isRunning && (updates.cores !== undefined || updates.memory !== undefined)) {
+        newPending.add('hardware');
+      }
+      // Clear sections that don't need restart
+      if (updates.ide2 !== undefined) newPending.delete('media');
+      if (updates.boot !== undefined) newPending.delete('boot');
+      if (updates.description !== undefined) newPending.delete('notes');
+      setPendingSections(newPending);
+
+      if (newPending.size > 0) {
+        setMessage({ type: 'warning', text: 'Configuration saved. Restart the VM to apply hardware changes.' });
+      } else {
+        setMessage({ type: 'success', text: 'Configuration saved' });
+      }
       onSaved();
     } catch (err) {
       setMessage({ type: 'error', text: err.message });
@@ -108,22 +140,15 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
 
   return (
     <div className="space-y-6">
-      {isRunning && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 text-sm p-3 rounded-lg flex items-center gap-2">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-          </svg>
-          VM is running. CPU and RAM changes require a restart to take effect.
-        </div>
-      )}
-
       {message && (
         <div className={`p-3 rounded-lg text-sm border flex items-center gap-2 ${
           message.type === 'success' ? 'bg-green-50 text-green-700 border-green-200' :
           message.type === 'error' ? 'bg-red-50 text-red-700 border-red-200' :
+          message.type === 'warning' ? 'bg-amber-50 text-amber-700 border-amber-200' :
           'bg-blue-50 text-blue-700 border-blue-200'
         }`}>
           {message.type === 'success' && <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>}
+          {message.type === 'warning' && <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>}
           {message.text}
         </div>
       )}
@@ -132,16 +157,24 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
       {isAdmin && (
         <div>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Hardware</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-slate-50 rounded-lg p-4 border border-gray-100">
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5">CPU Cores</label>
-              <input type="number" min={1} max={128} value={cores} onChange={(e) => setCores(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50" />
-            </div>
-            <div className="bg-slate-50 rounded-lg p-4 border border-gray-100">
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Memory (MB)</label>
-              <input type="number" min={128} step={128} value={memory} onChange={(e) => setMemory(e.target.value)}
-                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50" />
+          <div className={`${sectionClass(hwChanged, 'hardware')} transition-all duration-300`}>
+            {pendingSections.has('hardware') && (
+              <p className="text-xs text-amber-600 font-medium mb-3 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" /></svg>
+                Restart required to apply these changes
+              </p>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">CPU Cores</label>
+                <input type="number" min={1} max={128} value={cores} onChange={(e) => setCores(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1.5">Memory (MB)</label>
+                <input type="number" min={128} step={128} value={memory} onChange={(e) => setMemory(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50" />
+              </div>
             </div>
           </div>
         </div>
@@ -150,7 +183,7 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
       {/* Media section */}
       <div>
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Media</h3>
-        <div className="bg-slate-50 rounded-lg p-4 border border-gray-100">
+        <div className={`${sectionClass(mediaChanged, 'media')} transition-all duration-300`}>
           <label className="block text-xs font-semibold text-gray-500 mb-1.5">CD/DVD Drive (ide2)</label>
           {loadingISOs ? (
             <div className="text-sm text-gray-400">Loading ISOs...</div>
@@ -169,7 +202,7 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
       {/* Boot Order section */}
       <div>
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Boot Order</h3>
-        <div className="bg-slate-50 rounded-lg p-4 border border-gray-100">
+        <div className={`${sectionClass(bootChanged, 'boot')} transition-all duration-300`}>
           <div className="space-y-1.5">
             {boot.map((device, i) => (
               <div key={device} className="flex items-center gap-2 bg-white rounded-lg px-3 py-2.5 border border-gray-200 shadow-sm">
@@ -209,7 +242,7 @@ function ConfigEditor({ node, type, vmid, config, isRunning, isAdmin, onSaved })
       {/* Notes section */}
       <div>
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Notes</h3>
-        <div className="bg-slate-50 rounded-lg p-4 border border-gray-100">
+        <div className={`${sectionClass(notesChanged, 'notes')} transition-all duration-300`}>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
             className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
             placeholder="VM description or notes..." />
