@@ -221,4 +221,94 @@ router.post('/:node/qemu', async (req, res) => {
   }
 });
 
+// ── Backups ──
+
+// List backups for a VM
+router.get('/:node/:type(qemu|lxc)/:vmid/backups', async (req, res) => {
+  const { node, type, vmid } = req.params;
+  try {
+    const client = pve(req);
+    // Get all storages that support backup content
+    const { data: storageData } = await client.get(`/nodes/${node}/storage`);
+    const backupStorages = storageData.data.filter((s) =>
+      s.content && s.content.split(',').includes('backup')
+    );
+
+    const allBackups = [];
+    for (const s of backupStorages) {
+      try {
+        const { data } = await client.get(`/nodes/${node}/storage/${s.storage}/content`, {
+          params: { content: 'backup', vmid },
+        });
+        allBackups.push(...data.data.map((b) => ({ ...b, storage: s.storage })));
+      } catch {}
+    }
+
+    allBackups.sort((a, b) => (b.ctime || 0) - (a.ctime || 0));
+    res.json(allBackups);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to list backups' });
+  }
+});
+
+// Create a backup
+router.post('/:node/:type(qemu|lxc)/:vmid/backup', async (req, res) => {
+  const { node, type, vmid } = req.params;
+  const { storage, mode, compress, notes } = req.body;
+  try {
+    const client = pve(req);
+    const params = {
+      vmid,
+      mode: mode || 'snapshot',
+      compress: compress || 'zstd',
+    };
+    if (storage) params.storage = storage;
+    if (notes) params.notes = notes;
+
+    const { data } = await client.post(
+      `/nodes/${node}/vzdump`,
+      new URLSearchParams(params)
+    );
+    res.json({ taskid: data.data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to create backup' });
+  }
+});
+
+// Restore a backup
+router.post('/:node/:type(qemu|lxc)/:vmid/restore', async (req, res) => {
+  const { node, type, vmid } = req.params;
+  const { archive, storage } = req.body;
+  if (!archive) {
+    return res.status(400).json({ error: 'archive (volid) is required' });
+  }
+  try {
+    const client = pve(req);
+    const params = { vmid, archive, force: 1 };
+    if (storage) params.storage = storage;
+
+    const { data } = await client.post(
+      `/nodes/${node}/qemu`,
+      new URLSearchParams(params)
+    );
+    res.json({ taskid: data.data });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to restore backup' });
+  }
+});
+
+// Delete a backup
+router.delete('/:node/backup/:volid', async (req, res) => {
+  const { node, volid } = req.params;
+  // volid comes URL-encoded, e.g. local:backup/vzdump-qemu-100-...
+  try {
+    const client = pve(req);
+    const storage = volid.split(':')[0];
+    await client.delete(`/nodes/${node}/storage/${storage}/content/${volid}`);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: 'Failed to delete backup' });
+  }
+});
+
 export default router;

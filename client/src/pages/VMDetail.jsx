@@ -295,6 +295,229 @@ function MonitoringTab({ rrd, timeframe, setTimeframe }) {
   );
 }
 
+// ── Backups Tab ──
+
+function BackupsTab({ node, type, vmid }) {
+  const [backups, setBackups] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [storages, setStorages] = useState([]);
+  const [backupStorage, setBackupStorage] = useState('');
+  const [backupMode, setBackupMode] = useState('snapshot');
+  const [backupCompress, setBackupCompress] = useState('zstd');
+  const [backupNotes, setBackupNotes] = useState('');
+  const [message, setMessage] = useState(null);
+
+  const fetchBackups = useCallback(async () => {
+    try {
+      const data = await api.getBackups(node, type, vmid);
+      setBackups(data);
+    } catch {}
+    finally { setLoading(false); }
+  }, [node, type, vmid]);
+
+  useEffect(() => {
+    fetchBackups();
+    async function fetchStorages() {
+      try {
+        const data = await api.getAllStorages(node);
+        const bs = data.filter((s) => s.content && s.content.split(',').includes('backup'));
+        setStorages(bs);
+        if (bs.length > 0) setBackupStorage(bs[0].storage);
+      } catch {}
+    }
+    fetchStorages();
+  }, [fetchBackups, node]);
+
+  const handleCreate = async () => {
+    setCreating(true);
+    setMessage(null);
+    try {
+      await api.createBackup(node, type, vmid, {
+        storage: backupStorage,
+        mode: backupMode,
+        compress: backupCompress,
+        notes: backupNotes || undefined,
+      });
+      setMessage({ type: 'success', text: 'Backup task started. It may take a few minutes to complete.' });
+      setShowCreate(false);
+      setBackupNotes('');
+      setTimeout(fetchBackups, 5000);
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    } finally { setCreating(false); }
+  };
+
+  const handleRestore = async (volid) => {
+    if (!confirm(`Restore VM ${vmid} from this backup? The current VM will be overwritten.`)) return;
+    setMessage(null);
+    try {
+      await api.restoreBackup(node, type, vmid, volid);
+      setMessage({ type: 'success', text: 'Restore task started. The VM will be recreated from the backup.' });
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleDelete = async (volid) => {
+    if (!confirm('Delete this backup permanently?')) return;
+    setMessage(null);
+    try {
+      await api.deleteBackup(node, volid);
+      setMessage({ type: 'success', text: 'Backup deleted' });
+      fetchBackups();
+    } catch (err) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const fmtDate = (ts) => {
+    if (!ts) return '-';
+    return new Date(ts * 1000).toLocaleString();
+  };
+
+  const fmtSize = (bytes) => formatBytes(bytes);
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-12">
+        <div className="animate-spin w-6 h-6 border-2 border-gray-200 border-t-blue-600 rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      {message && (
+        <div className={`p-3 rounded-lg text-sm border flex items-center gap-2 ${
+          message.type === 'success' ? 'bg-green-50 text-green-700 border-green-200' :
+          'bg-red-50 text-red-700 border-red-200'
+        }`}>
+          {message.text}
+        </div>
+      )}
+
+      {/* Create backup form */}
+      {showCreate ? (
+        <div className="bg-slate-50 rounded-lg p-5 border border-gray-100 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-900">Create Backup</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Storage</label>
+              <select value={backupStorage} onChange={(e) => setBackupStorage(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                {storages.map((s) => (
+                  <option key={s.storage} value={s.storage}>{s.storage}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Mode</label>
+              <select value={backupMode} onChange={(e) => setBackupMode(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                <option value="snapshot">Snapshot (no downtime)</option>
+                <option value="suspend">Suspend (brief pause)</option>
+                <option value="stop">Stop (VM stops during backup)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1.5">Compression</label>
+              <select value={backupCompress} onChange={(e) => setBackupCompress(e.target.value)}
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50">
+                <option value="zstd">ZSTD (recommended)</option>
+                <option value="lzo">LZO (fast)</option>
+                <option value="gzip">GZIP (compatible)</option>
+                <option value="0">None</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-1.5">Notes (optional)</label>
+            <input type="text" value={backupNotes} onChange={(e) => setBackupNotes(e.target.value)}
+              className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+              placeholder="e.g. Before upgrade" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCreate(false)}
+              className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-200 rounded-lg cursor-pointer transition-colors">
+              Cancel
+            </button>
+            <button onClick={handleCreate} disabled={creating}
+              className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium cursor-pointer disabled:opacity-50 transition-colors shadow-sm">
+              {creating ? 'Starting...' : 'Start Backup'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <button onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium cursor-pointer transition-colors shadow-sm">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Create Backup
+          </button>
+        </div>
+      )}
+
+      {/* Backup list */}
+      {backups.length === 0 ? (
+        <div className="text-center py-12">
+          <svg className="w-10 h-10 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+          </svg>
+          <p className="text-sm text-gray-400">No backups found for this VM</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-gray-200">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-slate-50 border-b border-gray-200">
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Date</th>
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Size</th>
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Storage</th>
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Format</th>
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider">Notes</th>
+                <th className="py-2.5 px-4 text-[11px] font-bold text-gray-400 uppercase tracking-wider text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {backups.map((b, i) => (
+                <tr key={b.volid} className={`border-t border-gray-100 hover:bg-blue-50/40 transition-colors ${i % 2 === 1 ? 'bg-slate-50/70' : ''}`}>
+                  <td className="py-2.5 px-4 text-sm text-gray-900">{fmtDate(b.ctime)}</td>
+                  <td className="py-2.5 px-4 text-sm text-gray-500">{fmtSize(b.size)}</td>
+                  <td className="py-2.5 px-4">
+                    <span className="text-xs font-medium bg-gray-100 text-gray-500 px-2 py-0.5 rounded">{b.storage}</span>
+                  </td>
+                  <td className="py-2.5 px-4 text-xs text-gray-500">{b.format || '-'}</td>
+                  <td className="py-2.5 px-4 text-xs text-gray-500 max-w-[200px] truncate">{b.notes || '-'}</td>
+                  <td className="py-2.5 px-4">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => handleRestore(b.volid)} title="Restore"
+                        className="p-1.5 rounded-md text-blue-600 hover:bg-blue-50 cursor-pointer transition-colors">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M2.985 19.644l3.181-3.182" />
+                        </svg>
+                      </button>
+                      <button onClick={() => handleDelete(b.volid)} title="Delete"
+                        className="p-1.5 rounded-md text-red-600 hover:bg-red-50 cursor-pointer transition-colors">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Detail Page ──
 
 export default function VMDetail() {
@@ -441,6 +664,8 @@ export default function VMDetail() {
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>} />
           <Tab label="Monitoring" active={activeTab === 'monitor'} onClick={() => setActiveTab('monitor')}
             icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" /></svg>} />
+          <Tab label="Backups" active={activeTab === 'backups'} onClick={() => setActiveTab('backups')}
+            icon={<svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg>} />
         </div>
         <div className="p-6">
           {activeTab === 'config' && (
@@ -449,6 +674,9 @@ export default function VMDetail() {
           )}
           {activeTab === 'monitor' && (
             <MonitoringTab rrd={rrd} timeframe={timeframe} setTimeframe={setTimeframe} />
+          )}
+          {activeTab === 'backups' && (
+            <BackupsTab node={node} type={type} vmid={vmid} />
           )}
         </div>
       </div>

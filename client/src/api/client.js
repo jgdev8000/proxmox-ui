@@ -50,6 +50,21 @@ export const api = {
   createVM: (node, config) =>
     request(`/vms/${node}/qemu`, { method: 'POST', body: JSON.stringify(config) }),
 
+  // Backups
+  getBackups: (node, type, vmid) => request(`/vms/${node}/${type}/${vmid}/backups`),
+  createBackup: (node, type, vmid, options) =>
+    request(`/vms/${node}/${type}/${vmid}/backup`, {
+      method: 'POST',
+      body: JSON.stringify(options),
+    }),
+  restoreBackup: (node, type, vmid, archive, storage) =>
+    request(`/vms/${node}/${type}/${vmid}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ archive, storage }),
+    }),
+  deleteBackup: (node, volid) =>
+    request(`/vms/${node}/backup/${encodeURIComponent(volid)}`, { method: 'DELETE' }),
+
   // Admin
   admin: {
     getUsers: () => request('/admin/users'),
