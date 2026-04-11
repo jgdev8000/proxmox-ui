@@ -1,5 +1,56 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import https from 'node:https';
+import crypto from 'node:crypto';
 import config from './config.js';
+
+function connectToProxmoxWS(targetPath, ticket, callback) {
+  const key = crypto.randomBytes(16).toString('base64');
+
+  const options = {
+    hostname: config.proxmox.host,
+    port: config.proxmox.port,
+    path: targetPath,
+    method: 'GET',
+    rejectUnauthorized: false,
+    headers: {
+      'Connection': 'Upgrade',
+      'Upgrade': 'websocket',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Key': key,
+      'Sec-WebSocket-Protocol': 'binary',
+      'Cookie': `PVEAuthCookie=${ticket}`,
+      'Host': `${config.proxmox.host}:${config.proxmox.port}`,
+      'Origin': `https://${config.proxmox.host}:${config.proxmox.port}`,
+    },
+  };
+
+  console.log(`[ws] Raw upgrade request to: ${options.hostname}:${options.port}${targetPath.split('?')[0]}`);
+
+  const req = https.request(options);
+
+  req.on('upgrade', (res, socket, head) => {
+    console.log(`[ws] Upgrade successful`);
+    callback(null, socket);
+  });
+
+  req.on('response', (res) => {
+    let body = '';
+    res.on('data', (chunk) => body += chunk);
+    res.on('end', () => {
+      console.error(`[ws] Upgrade rejected: ${res.statusCode} ${res.statusMessage}`);
+      console.error(`[ws] Response headers:`, JSON.stringify(res.headers));
+      console.error(`[ws] Response body: ${body}`);
+      callback(new Error(`Upgrade rejected: ${res.statusCode}`));
+    });
+  });
+
+  req.on('error', (err) => {
+    console.error(`[ws] Request error: ${err.message}`);
+    callback(err);
+  });
+
+  req.end();
+}
 
 export function setupWebSocket(server, sessionMiddleware) {
   const wss = new WebSocketServer({
@@ -48,66 +99,38 @@ export function setupWebSocket(server, sessionMiddleware) {
 
     const { ticket } = req.session.pve;
 
-    // Both VM console and node terminal use the same vncwebsocket endpoint
     const basePath = vmid
       ? `/api2/json/nodes/${node}/${type}/${vmid}/vncwebsocket`
       : `/api2/json/nodes/${node}/vncwebsocket`;
 
-    const targetUrl = `wss://${config.proxmox.host}:${config.proxmox.port}${basePath}?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
+    const targetPath = `${basePath}?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
 
-    console.log(`[ws] Target URL: ${basePath}?port=${port}&vncticket=<hidden>`);
-    console.log(`[ws] Connecting to Proxmox: ${vmid ? `${node}/${type}/${vmid}` : `node/${node}`}`);
+    connectToProxmoxWS(targetPath, ticket, (err, pveSocket) => {
+      if (err) {
+        clientWs.close();
+        return;
+      }
 
-    const pveWs = new WebSocket(targetUrl, 'binary', {
-      headers: {
-        Cookie: `PVEAuthCookie=${ticket}`,
-      },
-      rejectUnauthorized: false,
-    });
-
-    let msgCount = 0;
-
-    pveWs.on('open', () => {
-      console.log(`[ws] Connected to Proxmox for ${vmid ? `${type}/${vmid}` : `node/${node}`}`);
-
-      clientWs.on('message', (data, isBinary) => {
-        if (pveWs.readyState === WebSocket.OPEN) {
-          pveWs.send(data, { binary: isBinary });
+      // Raw TCP socket from the upgraded connection — pipe data bidirectionally
+      pveSocket.on('data', (data) => {
+        if (clientWs.readyState === WebSocket.OPEN) {
+          clientWs.send(data);
         }
       });
-    });
 
-    pveWs.on('message', (data, isBinary) => {
-      msgCount++;
-      if (msgCount <= 3) {
-        console.log(`[ws] PVE→client msg #${msgCount}: ${data.length} bytes, binary=${isBinary}`);
-      }
-      if (clientWs.readyState === WebSocket.OPEN) {
-        clientWs.send(data, { binary: isBinary });
-      }
-    });
+      clientWs.on('message', (data) => {
+        if (!pveSocket.destroyed) {
+          pveSocket.write(data);
+        }
+      });
 
-    pveWs.on('unexpected-response', (req, res) => {
-      console.error(`[ws] Unexpected response: ${res.statusCode} ${res.statusMessage}`);
-      let body = '';
-      res.on('data', (chunk) => body += chunk);
-      res.on('end', () => {
-        console.error(`[ws] Response body: ${body}`);
+      pveSocket.on('close', () => clientWs.close());
+      pveSocket.on('error', (e) => {
+        console.error(`[ws] PVE socket error: ${e.message}`);
         clientWs.close();
       });
+      clientWs.on('close', () => pveSocket.destroy());
+      clientWs.on('error', () => pveSocket.destroy());
     });
-
-    pveWs.on('error', (err) => {
-      console.error(`[ws] Proxmox WS error: ${err.message}`);
-      clientWs.close();
-    });
-
-    pveWs.on('close', (code, reason) => {
-      console.log(`[ws] Proxmox WS closed: ${code} ${String(reason)}`);
-      clientWs.close();
-    });
-
-    clientWs.on('close', () => pveWs.close());
-    clientWs.on('error', () => pveWs.close());
   });
 }
