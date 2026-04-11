@@ -1,55 +1,61 @@
-import { WebSocketServer, WebSocket } from 'ws';
+import { WebSocketServer, WebSocket, createWebSocketStream } from 'ws';
 import https from 'node:https';
 import crypto from 'node:crypto';
 import config from './config.js';
 
-function connectToProxmoxWS(targetPath, ticket, callback) {
-  const key = crypto.randomBytes(16).toString('base64');
+function connectToProxmoxWS(targetPath, ticket) {
+  return new Promise((resolve, reject) => {
+    const key = crypto.randomBytes(16).toString('base64');
 
-  const options = {
-    hostname: config.proxmox.host,
-    port: config.proxmox.port,
-    path: targetPath,
-    method: 'GET',
-    rejectUnauthorized: false,
-    headers: {
-      'Connection': 'Upgrade',
-      'Upgrade': 'websocket',
-      'Sec-WebSocket-Version': '13',
-      'Sec-WebSocket-Key': key,
-      'Sec-WebSocket-Protocol': 'binary',
-      'Cookie': `PVEAuthCookie=${ticket}`,
-      'Host': `${config.proxmox.host}:${config.proxmox.port}`,
-      'Origin': `https://${config.proxmox.host}:${config.proxmox.port}`,
-    },
-  };
+    const options = {
+      hostname: config.proxmox.host,
+      port: config.proxmox.port,
+      path: targetPath,
+      method: 'GET',
+      rejectUnauthorized: false,
+      headers: {
+        'Connection': 'Upgrade',
+        'Upgrade': 'websocket',
+        'Sec-WebSocket-Version': '13',
+        'Sec-WebSocket-Key': key,
+        'Sec-WebSocket-Protocol': 'binary',
+        'Cookie': `PVEAuthCookie=${ticket}`,
+        'Host': `${config.proxmox.host}:${config.proxmox.port}`,
+        'Origin': `https://${config.proxmox.host}:${config.proxmox.port}`,
+      },
+    };
 
-  console.log(`[ws] Raw upgrade request to: ${options.hostname}:${options.port}${targetPath.split('?')[0]}`);
+    console.log(`[ws] Raw upgrade to: ${options.hostname}:${options.port}${targetPath.split('?')[0]}`);
 
-  const req = https.request(options);
+    const req = https.request(options);
 
-  req.on('upgrade', (res, socket, head) => {
-    console.log(`[ws] Upgrade successful`);
-    callback(null, socket);
-  });
-
-  req.on('response', (res) => {
-    let body = '';
-    res.on('data', (chunk) => body += chunk);
-    res.on('end', () => {
-      console.error(`[ws] Upgrade rejected: ${res.statusCode} ${res.statusMessage}`);
-      console.error(`[ws] Response headers:`, JSON.stringify(res.headers));
-      console.error(`[ws] Response body: ${body}`);
-      callback(new Error(`Upgrade rejected: ${res.statusCode}`));
+    req.on('upgrade', (res, socket, head) => {
+      console.log(`[ws] Upgrade successful, wrapping in WebSocket`);
+      // Wrap the raw socket in a ws WebSocket object
+      const pveWs = new WebSocket(null);
+      pveWs.setSocket(socket, head, {
+        maxPayload: 100 * 1024 * 1024,
+        skipUTF8Validation: true,
+      });
+      resolve(pveWs);
     });
-  });
 
-  req.on('error', (err) => {
-    console.error(`[ws] Request error: ${err.message}`);
-    callback(err);
-  });
+    req.on('response', (res) => {
+      let body = '';
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        console.error(`[ws] Upgrade rejected: ${res.statusCode} - ${body}`);
+        reject(new Error(`Upgrade rejected: ${res.statusCode}`));
+      });
+    });
 
-  req.end();
+    req.on('error', (err) => {
+      console.error(`[ws] Request error: ${err.message}`);
+      reject(err);
+    });
+
+    req.end();
+  });
 }
 
 export function setupWebSocket(server, sessionMiddleware) {
@@ -71,7 +77,6 @@ export function setupWebSocket(server, sessionMiddleware) {
 
     sessionMiddleware(req, res, () => {
       if (!req.session?.pve) {
-        console.error('[ws] No session, rejecting upgrade');
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
@@ -83,7 +88,7 @@ export function setupWebSocket(server, sessionMiddleware) {
     });
   });
 
-  wss.on('connection', (clientWs, req) => {
+  wss.on('connection', async (clientWs, req) => {
     const url = new URL(req.url, 'http://localhost');
     const node = url.searchParams.get('node');
     const type = url.searchParams.get('type') || 'qemu';
@@ -92,7 +97,6 @@ export function setupWebSocket(server, sessionMiddleware) {
     const vncticket = url.searchParams.get('vncticket');
 
     if (!node || !port || !vncticket) {
-      console.error('[ws] Missing params:', { node, vmid, port, vncticket: !!vncticket });
       clientWs.close(1008, 'Missing parameters');
       return;
     }
@@ -105,32 +109,40 @@ export function setupWebSocket(server, sessionMiddleware) {
 
     const targetPath = `${basePath}?port=${port}&vncticket=${encodeURIComponent(vncticket)}`;
 
-    connectToProxmoxWS(targetPath, ticket, (err, pveSocket) => {
-      if (err) {
-        clientWs.close();
-        return;
-      }
+    try {
+      const pveWs = await connectToProxmoxWS(targetPath, ticket);
 
-      // Raw TCP socket from the upgraded connection — pipe data bidirectionally
-      pveSocket.on('data', (data) => {
+      let msgCount = 0;
+
+      pveWs.on('message', (data, isBinary) => {
+        msgCount++;
+        if (msgCount <= 3) {
+          console.log(`[ws] PVE→client #${msgCount}: ${data.length} bytes, binary=${isBinary}`);
+        }
         if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(data);
+          clientWs.send(data, { binary: isBinary });
         }
       });
 
-      clientWs.on('message', (data) => {
-        if (!pveSocket.destroyed) {
-          pveSocket.write(data);
+      clientWs.on('message', (data, isBinary) => {
+        if (pveWs.readyState === WebSocket.OPEN) {
+          pveWs.send(data, { binary: isBinary });
         }
       });
 
-      pveSocket.on('close', () => clientWs.close());
-      pveSocket.on('error', (e) => {
-        console.error(`[ws] PVE socket error: ${e.message}`);
+      pveWs.on('close', (code, reason) => {
+        console.log(`[ws] PVE closed: ${code} ${String(reason)}`);
         clientWs.close();
       });
-      clientWs.on('close', () => pveSocket.destroy());
-      clientWs.on('error', () => pveSocket.destroy());
-    });
+      pveWs.on('error', (e) => {
+        console.error(`[ws] PVE error: ${e.message}`);
+        clientWs.close();
+      });
+      clientWs.on('close', () => pveWs.close());
+      clientWs.on('error', () => pveWs.close());
+
+    } catch (err) {
+      clientWs.close();
+    }
   });
 }
