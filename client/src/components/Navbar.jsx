@@ -29,7 +29,7 @@ export default function Navbar() {
 
   return (
     <nav className="sticky top-0 z-50 bg-gray-950 border-b border-gray-800 shadow-lg shadow-black/10">
-      <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+      <div className="px-6 h-14 flex items-center justify-between">
         <Link to="/" className="flex items-center gap-2.5 group">
           <BrandLogo username={user} />
           <span className="text-white font-semibold text-sm tracking-wide group-hover:text-gray-200 transition-colors">
