@@ -36,6 +36,14 @@ export const api = {
   getConsoleTicket: (node, type, vmid) =>
     request(`/console/${node}/${type}/${vmid}`, { method: 'POST' }),
 
+  updateConfig: (node, type, vmid, config) =>
+    request(`/vms/${node}/${type}/${vmid}/config`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    }),
+  getStorages: (node) => request(`/vms/${node}/storage`),
+  getISOs: (node, storage) => request(`/vms/${node}/storage/${storage}/isos`),
+
   // Admin
   admin: {
     getUsers: () => request('/admin/users'),
